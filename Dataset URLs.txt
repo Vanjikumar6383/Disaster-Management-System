@@ -1,0 +1,5 @@
+earthquake dataset :  https://www.kaggle.com/datasets/zaneneave/global-earthquakes-2020-2026
+
+cyclone dataset    :  https://www.kaggle.com/datasets/gastondana/bexar-county-texas-tornado-events-19502026
+
+Global Natural Events (NASA EONET, 2011–2026)  :   https://www.kaggle.com/datasets/zaneneave/global-natural-events-nasa-eonet-20112026
