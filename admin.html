@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Disaster Management System Admin Panel — Live satellite map, rescue team management, and disaster coordination." />
+  <title>Disaster Helper — Admin Panel</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    /* Admin-specific overrides */
+    .admin-map-section {
+      height: 500px;
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+      border: 1px solid var(--border-primary);
+      position: relative;
+    }
+    .admin-map-section #admin-map { height: 100%; width: 100%; }
+
+    .map-legend {
+      position: absolute;
+      bottom: 20px;
+      right: 20px;
+      background: rgba(21, 21, 21, 0.92);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid var(--border-primary);
+      border-radius: var(--radius-md);
+      padding: var(--space-md) var(--space-lg);
+      z-index: 1000;
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-sm);
+    }
+    .map-legend__title {
+      font-size: var(--font-xs);
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 4px;
+    }
+    .map-legend__item {
+      display: flex;
+      align-items: center;
+      gap: var(--space-sm);
+      font-size: var(--font-xs);
+      color: var(--text-secondary);
+    }
+    .map-legend__dot {
+      width: 10px;
+      height: 10px;
+      border-radius: var(--radius-full);
+      flex-shrink: 0;
+    }
+
+    .teams-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: var(--space-lg);
+    }
+
+    .admin-overview-cards {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: var(--space-lg);
+    }
+
+    .overview-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-primary);
+      border-radius: var(--radius-lg);
+      padding: var(--space-xl);
+      text-align: center;
+      transition: all var(--transition-base);
+      position: relative;
+      overflow: hidden;
+    }
+    .overview-card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 3px;
+      border-radius: 3px 3px 0 0;
+    }
+    .overview-card--red::before { background: var(--red); }
+    .overview-card--amber::before { background: var(--amber); }
+    .overview-card--green::before { background: var(--green); }
+    .overview-card--blue::before { background: var(--blue); }
+
+    .overview-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-card); }
+    .overview-card__icon { font-size: 2rem; margin-bottom: var(--space-sm); }
+    .overview-card__value {
+      font-size: var(--font-2xl);
+      font-weight: 800;
+      color: var(--text-bright);
+    }
+    .overview-card__label {
+      font-size: var(--font-xs);
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-top: var(--space-xs);
+    }
+
+    .response-chart-container {
+      height: 250px;
+    }
+
+    @media (max-width: 1200px) {
+      .admin-overview-cards { grid-template-columns: repeat(2, 1fr); }
+    }
+    @media (max-width: 768px) {
+      .admin-overview-cards { grid-template-columns: 1fr; }
+      .teams-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ============ ADMIN LOGIN MODAL ============ -->
+  <div class="modal-overlay" id="admin-login-modal">
+    <div class="login-card">
+      <div class="login-card__icon">🛡️</div>
+      <div class="login-card__title">Admin Access</div>
+      <div class="login-card__desc">Enter your admin credentials to access the control panel</div>
+      <form id="admin-login-form">
+        <div class="form-group">
+          <label for="admin-username">Username</label>
+          <input type="text" id="admin-username" class="form-input" placeholder="Enter username" value="admin" required />
+        </div>
+        <div class="form-group">
+          <label for="admin-password">Password</label>
+          <input type="password" id="admin-password" class="form-input" placeholder="Enter password" value="admin123" required />
+        </div>
+        <button type="submit" class="btn btn--primary btn--block" id="btn-admin-login">
+          🔓 Access Control Panel
+        </button>
+        <p style="margin-top: var(--space-md); font-size: var(--font-xs); color: var(--text-muted);">
+          Default: admin / admin123
+        </p>
+      </form>
+    </div>
+  </div>
+
+  <!-- ============ ADMIN DASHBOARD (hidden until login) ============ -->
+  <div id="admin-dashboard" style="display: none;">
+
+    <!-- Navigation -->
+    <nav class="navbar">
+      <div class="navbar__logo">
+        <span class="navbar__logo-icon">🌊</span>
+        <span>flood rescue command</span>
+        <span style="font-size: var(--font-xs); color: var(--text-muted); margin-left: var(--space-sm); background: var(--red-glow); color: var(--red); padding: 2px 8px; border-radius: 4px;">ADMIN HQ</span>
+      </div>
+
+      <div class="navbar__nav">
+        <a href="#" class="navbar__link navbar__link--active">🗺️ Live Flood Map</a>
+        <a href="#teams-section" class="navbar__link">🚣 Rescue Boats & Units</a>
+        <a href="#disasters-overview" class="navbar__link">🌊 Flood Emergencies</a>
+        <a href="#ml-prediction-section" class="navbar__link">🤖 AI Risk Predictor</a>
+        <a href="#analytics-section" class="navbar__link">📈 Response Analytics</a>
+      </div>
+
+      <div class="navbar__right">
+        <div class="navbar__search">
+          <span class="navbar__search-icon">🔍</span>
+          <input type="text" placeholder="Search flood zones, boats, teams..." />
+        </div>
+        <button class="btn btn--sm" id="btn-test-danger-alert" style="background: rgba(239, 68, 68, 0.25); border: 1.5px solid var(--red); color: #fff; font-weight: 700;">🚨 Test Siren Alert</button>
+        <a href="index.html" class="btn btn--outline btn--sm">← Public Flood Portal</a>
+        <button class="btn btn--danger btn--sm" id="btn-admin-logout">Logout</button>
+      </div>
+    </nav>
+
+    <div class="main-layout main-layout--full">
+      <div class="main-content">
+
+        <!-- Overview Cards -->
+        <div class="admin-overview-cards fade-in delay-1">
+          <div class="overview-card overview-card--red">
+            <div class="overview-card__icon">🌊</div>
+            <div class="overview-card__value" id="admin-active-disasters">5</div>
+            <div class="overview-card__label">Active Flood Zones</div>
+          </div>
+          <div class="overview-card overview-card--green">
+            <div class="overview-card__icon">🚣</div>
+            <div class="overview-card__value" id="admin-teams-deployed">9</div>
+            <div class="overview-card__label">Rescue Boats & Units Deployed</div>
+          </div>
+          <div class="overview-card overview-card--amber">
+            <div class="overview-card__icon">👥</div>
+            <div class="overview-card__value" id="admin-affected">143,200</div>
+            <div class="overview-card__label">People in Flooded Areas</div>
+          </div>
+          <div class="overview-card overview-card--blue">
+            <div class="overview-card__icon">✅</div>
+            <div class="overview-card__value" id="admin-resolved">1</div>
+            <div class="overview-card__label">Evacuated & Safe</div>
+          </div>
+        </div>
+
+        <!-- Live Satellite Map -->
+        <div class="card fade-in delay-2">
+          <div class="card__header">
+            <div class="card__title">
+              <span class="card__title-icon">🗺️</span>
+              Live Satellite Map — Flood Inundation & Boat Operations
+            </div>
+            <div class="card__actions">
+              <button class="btn btn--outline btn--sm" id="btn-refresh-map">🔄 Refresh</button>
+              <button class="btn btn--outline btn--sm" id="btn-center-map">🎯 Center India</button>
+            </div>
+          </div>
+          <div class="admin-map-section">
+            <div id="admin-map"></div>
+            <div class="map-legend">
+              <div class="map-legend__title">Legend</div>
+              <div class="map-legend__item">
+                <span class="map-legend__dot" style="background: var(--red);"></span>
+                Active Flood Zone
+              </div>
+              <div class="map-legend__item">
+                <span class="map-legend__dot" style="background: var(--amber);"></span>
+                Rising Water / Monitoring
+              </div>
+              <div class="map-legend__item">
+                <span class="map-legend__dot" style="background: var(--green);"></span>
+                Rescue Boat / Diver Fleet
+              </div>
+              <div class="map-legend__item">
+                <span class="map-legend__dot" style="background: var(--text-muted);"></span>
+                Water Receded / Safe
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Rescue Teams Section -->
+        <div class="card fade-in delay-3" id="teams-section">
+          <div class="card__header">
+            <div class="card__title">
+              <span class="card__title-icon">👥</span>
+              Flood Rescue & Boat Fleet — Live Status & Locations
+            </div>
+            <div class="card__actions">
+              <div class="table-filter" id="team-status-filter">
+                <span>All Status</span>
+                <span class="table-filter__icon">▾</span>
+              </div>
+            </div>
+          </div>
+          <div class="teams-grid" id="teams-grid">
+            <!-- Populated by JS -->
+          </div>
+        </div>
+
+        <!-- All Disasters Overview -->
+        <div class="card fade-in delay-4" id="disasters-overview">
+          <div class="card__header">
+            <div class="card__title">
+              <span class="card__title-icon">🌊</span>
+              All Reported Flood Emergencies
+            </div>
+          </div>
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Flooded Zone / Source</th>
+                <th>Water & Severity</th>
+                <th>Status</th>
+                <th>Assigned Rescue Units</th>
+                <th>Affected Pop.</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="admin-disaster-table">
+              <!-- Populated by JS -->
+            </tbody>
+          </table>
+        </div>
+
+        <!-- ============ AI FLOOD RISK PREDICTION & MODEL COMPARISON CENTER ============ -->
+        <div class="card fade-in delay-5" id="ml-prediction-section" style="border: 1.5px solid rgba(59, 130, 246, 0.45); box-shadow: 0 0 30px rgba(59, 130, 246, 0.12);">
+          <div class="card__header" style="flex-wrap: wrap; gap: var(--space-sm);">
+            <div>
+              <div class="card__title" style="color: #60a5fa; display: flex; align-items: center; gap: 8px;">
+                <span class="card__title-icon">🤖</span>
+                Machine Learning Flood Risk Predictor & Model Benchmark
+              </div>
+              <p style="font-size: var(--font-xs); color: var(--text-muted); margin-top: 4px;">
+                Trained and benchmarked 3 Machine Learning algorithms (<strong style="color:#fff;">Random Forest</strong>, <strong style="color:#fff;">XGBoost</strong>, <strong style="color:#fff;">LightGBM</strong>) on the <strong>Power BI Cleaned Dataset (30,000 records)</strong>. All models achieved &gt;99% accuracy, with the top performer deployed for active risk simulation.
+              </p>
+            </div>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <span class="active-model-pill" id="active-model-pill">Active Model: <strong>XGBoost (99.87% Acc)</strong></span>
+            </div>
+          </div>
+
+          <!-- Model Benchmark Scorecard -->
+          <div class="ml-benchmark-cards" id="ml-benchmark-cards">
+            <!-- Populated dynamically by JS with Random Forest, XGBoost, and LightGBM metrics -->
+          </div>
+
+          <!-- Interactive Simulator & Result Layout -->
+          <div class="ml-simulator-grid" style="margin-top: var(--space-xl);">
+            <!-- Left: Hydrological Inputs -->
+            <div class="ml-input-panel">
+              <div class="ml-panel-title">
+                <span>🎛️</span> Hydrological & Environmental Sensor Parameters
+              </div>
+
+              <div class="form-group" style="margin-bottom: var(--space-md);">
+                <label for="ml-input-zone" style="font-size: var(--font-xs);">Target Flood Basin / Zone Name</label>
+                <input type="text" id="ml-input-zone" class="form-input" value="Kanchipuram Palar Basin (Simulation)" />
+              </div>
+
+              <div class="ml-slider-row">
+                <div class="ml-slider-header">
+                  <span>🌧️ 24h Cumulative Rainfall:</span>
+                  <strong id="val-rainfall">240 mm</strong>
+                </div>
+                <input type="range" id="ml-rainfall" min="10" max="360" value="240" step="5" class="ml-range-slider" />
+              </div>
+
+              <div class="ml-slider-row">
+                <div class="ml-slider-header">
+                  <span>🌊 River Height Above Danger Mark:</span>
+                  <strong id="val-river">+3.4 m</strong>
+                </div>
+                <input type="range" id="ml-river" min="-2.0" max="5.0" value="3.4" step="0.1" class="ml-range-slider" />
+              </div>
+
+              <div class="ml-slider-row">
+                <div class="ml-slider-header">
+                  <span>⛰️ Ground Elevation Above Sea Level:</span>
+                  <strong id="val-elev">6.0 m</strong>
+                </div>
+                <input type="range" id="ml-elevation" min="2.0" max="80.0" value="6.0" step="1" class="ml-range-slider" />
+              </div>
+
+              <div class="ml-slider-row">
+                <div class="ml-slider-header">
+                  <span>🌱 Soil Moisture Saturation:</span>
+                  <strong id="val-soil">92%</strong>
+                </div>
+                <input type="range" id="ml-soil" min="20" max="100" value="92" step="1" class="ml-range-slider" />
+              </div>
+
+              <div class="ml-slider-row">
+                <div class="ml-slider-header">
+                  <span>🚪 Dam Sluice Gate Discharge:</span>
+                  <strong id="val-dam">2600 cumecs</strong>
+                </div>
+                <input type="range" id="ml-dam" min="0" max="4000" value="2600" step="100" class="ml-range-slider" />
+              </div>
+
+              <div class="ml-slider-row">
+                <div class="ml-slider-header">
+                  <span>🚧 Storm Drainage Efficiency:</span>
+                  <strong id="val-drain">18%</strong>
+                </div>
+                <input type="range" id="ml-drainage" min="5" max="95" value="18" step="1" class="ml-range-slider" />
+              </div>
+
+              <button class="btn btn--primary btn--block" id="btn-run-prediction" style="margin-top: var(--space-lg); font-size: var(--font-base); font-weight: 800; background: linear-gradient(135deg, #2563eb, #1d4ed8);">
+                ⚡ RUN AI FLOOD RISK ASSESSMENT
+              </button>
+            </div>
+
+            <!-- Right: Prediction Output -->
+            <div class="ml-output-panel" id="ml-output-panel">
+              <div class="ml-panel-title">
+                <span>📊</span> AI Prediction Assessment & Dispatch Recommendation
+              </div>
+
+              <!-- Risk Index Gauge -->
+              <div class="ml-result-header">
+                <div class="ml-risk-badge" id="ml-result-badge">CRITICAL FLOOD RISK</div>
+                <div class="ml-risk-metric">
+                  <div class="ml-risk-number" id="ml-result-risk">99.9%</div>
+                  <div class="ml-risk-label">Composite Flood Inundation Index</div>
+                </div>
+              </div>
+
+              <!-- Class Probability Distribution Bars -->
+              <div style="margin-top: var(--space-md);">
+                <div style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700; margin-bottom: 6px;">
+                  Model Confidence Distribution
+                </div>
+                <div class="prob-bar-container">
+                  <div class="prob-row">
+                    <span>Critical (&gt;6ft)</span>
+                    <div class="prob-track"><div class="prob-fill prob-fill--critical" id="prob-bar-critical" style="width: 99.7%;"></div></div>
+                    <strong id="prob-text-critical">99.7%</strong>
+                  </div>
+                  <div class="prob-row">
+                    <span>High (3-5ft)</span>
+                    <div class="prob-track"><div class="prob-fill prob-fill--high" id="prob-bar-high" style="width: 0.3%;"></div></div>
+                    <strong id="prob-text-high">0.3%</strong>
+                  </div>
+                  <div class="prob-row">
+                    <span>Medium (1-2ft)</span>
+                    <div class="prob-track"><div class="prob-fill prob-fill--medium" id="prob-bar-medium" style="width: 0%;"></div></div>
+                    <strong id="prob-text-medium">0.0%</strong>
+                  </div>
+                  <div class="prob-row">
+                    <span>Low (&lt;1ft)</span>
+                    <div class="prob-track"><div class="prob-fill prob-fill--low" id="prob-bar-low" style="width: 0%;"></div></div>
+                    <strong id="prob-text-low">0.0%</strong>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Recommendation Card -->
+              <div class="ml-action-card" id="ml-action-card">
+                <div class="ml-action-title">
+                  <span>🚣</span> Recommended Rescue Deployment: <strong id="ml-rec-boats">4 Inflatable Motorboats</strong>
+                </div>
+                <p id="ml-rec-action" style="font-size: var(--font-xs); color: #e5e5e5; margin: 6px 0; line-height: 1.5;">
+                  Deploy 4-6 Motorized Inflatable Rescue Boats and Diving Units immediately. Prepare rooftop winching and clear downstream causeways.
+                </p>
+                <div id="ml-rec-shelter" style="font-size: 0.72rem; color: #fca5a5; font-weight: 600;">
+                  Shelter Advisory: Relocate residents to high-elevation relief shelters (>25m elevation).
+                </div>
+              </div>
+
+              <!-- Broadcast Button -->
+              <button class="btn btn--danger btn--block" id="btn-broadcast-ml-alert" style="margin-top: var(--space-md); font-size: var(--font-sm); font-weight: 800;">
+                🚨 BROADCAST AS NEW ACTIVE FLOOD EMERGENCY
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Analytics Section -->
+        <div class="admin-grid fade-in delay-5" id="analytics-section">
+          <div class="card">
+            <div class="card__header">
+              <div class="card__title">
+                <span class="card__title-icon">📊</span>
+                Response Time Analysis
+              </div>
+            </div>
+            <div class="response-chart-container">
+              <canvas id="response-chart"></canvas>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card__header">
+              <div class="card__title">
+                <span class="card__title-icon">🔥</span>
+                Disaster Severity Breakdown
+              </div>
+            </div>
+            <div class="response-chart-container">
+              <canvas id="severity-chart"></canvas>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ ASSIGN TEAM MODAL ============ -->
+  <div class="modal-overlay hidden" id="assign-team-modal">
+    <div class="assign-modal-card">
+      <div class="assign-modal-header">
+        <div>
+          <div class="assign-modal-title">🛡️ Assign Rescue Team to Disaster</div>
+          <p style="font-size: var(--font-xs); color: var(--text-muted); margin-top: 4px;">
+            Deploy available emergency response teams to newly activated or active disasters.
+          </p>
+        </div>
+        <button class="assign-modal-close" id="btn-close-assign-modal">&times;</button>
+      </div>
+
+      <!-- Disaster Target Banner -->
+      <div class="disaster-target-banner" id="modal-disaster-banner">
+        <div class="disaster-target-info">
+          <span style="font-size: 1.8rem;" id="modal-disaster-icon">🚨</span>
+          <div>
+            <div class="disaster-target-zone" id="modal-disaster-zone">Zone Name</div>
+            <div class="disaster-target-type" id="modal-disaster-type">Type • Severity</div>
+          </div>
+        </div>
+        <div id="modal-disaster-status-badge"></div>
+      </div>
+
+      <!-- Teams Currently Assigned to this Disaster -->
+      <div style="margin-bottom: var(--space-lg);" id="modal-currently-assigned-container">
+        <div style="font-size: var(--font-xs); font-weight: 700; color: var(--text-secondary); text-transform: uppercase; margin-bottom: 8px;">
+          Currently Assigned Teams:
+        </div>
+        <div id="modal-assigned-teams-chips" style="display: flex; gap: 8px; flex-wrap: wrap;"></div>
+      </div>
+
+      <!-- Available Teams to Deploy -->
+      <div style="margin-bottom: var(--space-lg);">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-sm);">
+          <div style="font-size: var(--font-sm); font-weight: 700; color: var(--green); display: flex; align-items: center; gap: 6px;">
+            <span>✅</span> Available Teams (Ready for Immediate Deployment)
+          </div>
+          <span style="font-size: var(--font-xs); color: var(--green); font-weight: 600;" id="modal-available-count">0 Ready</span>
+        </div>
+        <div class="team-selection-list" id="modal-available-teams-list"></div>
+      </div>
+
+      <!-- Already Working / Busy Teams (Cannot be assigned) -->
+      <div>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-sm);">
+          <div style="font-size: var(--font-xs); font-weight: 700; color: var(--text-muted); text-transform: uppercase; display: flex; align-items: center; gap: 6px;">
+            <span>⛔</span> Currently Working Teams (Already Deployed - Cannot Assign)
+          </div>
+          <span style="font-size: var(--font-xs); color: var(--text-muted);" id="modal-busy-count">0 Working</span>
+        </div>
+        <div class="team-selection-list" id="modal-busy-teams-list"></div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ============ EMERGENCY DANGER ALERT POPUP (NEW FLOOD DETECTED) ============ -->
+  <div class="danger-alert-overlay hidden" id="emergency-danger-alert-modal">
+    <div class="danger-alert-card">
+      <div class="danger-alert-header">
+        <div class="danger-alert-headline">
+          <span class="danger-siren-icon">🚨</span>
+          <div>
+            <div class="danger-alert-title">CRITICAL FLOOD EMERGENCY REPORTED!</div>
+            <div class="danger-alert-sub">Immediate Attention & Boat Deployment Required</div>
+          </div>
+        </div>
+        <button class="danger-audio-toggle" id="btn-danger-audio-toggle">
+          <span id="danger-audio-icon">🔊</span> <span id="danger-audio-text">Siren Active</span>
+        </button>
+      </div>
+
+      <!-- Quick Details Grid -->
+      <div class="danger-details-grid">
+        <div>
+          <div class="danger-item-label">Flooded Zone / Area</div>
+          <div class="danger-item-value" id="danger-alert-zone">Chennai Marina Coastal</div>
+        </div>
+        <div>
+          <div class="danger-item-label">Water Depth Level</div>
+          <div class="danger-item-value" style="color: #ef4444;" id="danger-alert-depth">Submerged / Roof Level</div>
+        </div>
+        <div>
+          <div class="danger-item-label">Flood Type / Source</div>
+          <div class="danger-item-value" id="danger-alert-type">Flash Flood / River Breach</div>
+        </div>
+        <div>
+          <div class="danger-item-label">Reported Time</div>
+          <div class="danger-item-value" style="color: #f59e0b;" id="danger-alert-time">Just Now</div>
+        </div>
+      </div>
+
+      <!-- Emergency Details & Citizen Notes -->
+      <div class="danger-text-box" id="danger-alert-details">
+        Citizen report notes will display here...
+      </div>
+
+      <!-- Action Buttons -->
+      <div class="danger-alert-actions">
+        <button class="btn--danger-deploy" id="btn-danger-deploy">
+          <span>🛡️</span> DEPLOY RESCUE BOATS / TEAMS NOW
+        </button>
+        <button class="btn--danger-map" id="btn-danger-map">
+          <span>🗺️</span> View on Map
+        </button>
+        <button class="btn--danger-dismiss" id="btn-danger-dismiss">
+          Acknowledge & Close
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Container -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <script src="js/admin.js"></script>
+</body>
+</html>

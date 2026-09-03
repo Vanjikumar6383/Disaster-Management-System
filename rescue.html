@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Disaster Management System — Rescue Team Portal for field operations, status updates, and communication." />
+  <title>Disaster Helper — Rescue Team Portal</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    .rescue-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: var(--space-xl);
+    }
+    .rescue-full { grid-column: 1 / -1; }
+
+    .rescue-map-container {
+      height: 350px;
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+      border: 1px solid var(--border-primary);
+    }
+    .rescue-map-container #rescue-map { height: 100%; width: 100%; }
+
+    .disaster-detail-card {
+      background: linear-gradient(135deg, var(--bg-card), rgba(239, 68, 68, 0.05));
+      border: 1px solid var(--border-primary);
+      border-radius: var(--radius-lg);
+      padding: var(--space-xl);
+    }
+    .disaster-detail-card__title {
+      font-size: var(--font-lg);
+      font-weight: 800;
+      color: var(--text-bright);
+      margin-bottom: var(--space-xs);
+    }
+    .disaster-detail-card__zone {
+      font-size: var(--font-sm);
+      color: var(--text-secondary);
+      margin-bottom: var(--space-lg);
+    }
+    .disaster-detail-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: var(--space-md);
+    }
+    .disaster-detail-item {
+      padding: var(--space-md);
+      background: rgba(0, 0, 0, 0.2);
+      border-radius: var(--radius-md);
+    }
+    .disaster-detail-item__label {
+      font-size: var(--font-xs);
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 2px;
+    }
+    .disaster-detail-item__value {
+      font-size: var(--font-base);
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+    .disaster-detail-desc {
+      margin-top: var(--space-lg);
+      padding: var(--space-md);
+      background: rgba(0, 0, 0, 0.2);
+      border-radius: var(--radius-md);
+      font-size: var(--font-sm);
+      color: var(--text-secondary);
+      line-height: 1.6;
+    }
+
+    .team-profile {
+      display: flex;
+      align-items: center;
+      gap: var(--space-lg);
+      padding: var(--space-lg);
+      background: var(--bg-card);
+      border: 1px solid var(--border-primary);
+      border-radius: var(--radius-lg);
+      margin-bottom: var(--space-xl);
+    }
+    .team-profile__avatar {
+      width: 56px;
+      height: 56px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: var(--radius-lg);
+      background: var(--green-glow);
+      border: 2px solid var(--green);
+      font-size: 1.5rem;
+    }
+    .team-profile__info { flex: 1; }
+    .team-profile__name { font-size: var(--font-lg); font-weight: 700; color: var(--text-bright); }
+    .team-profile__type { font-size: var(--font-xs); color: var(--text-muted); }
+
+    .comm-input-bar {
+      display: flex;
+      gap: var(--space-sm);
+      margin-top: var(--space-md);
+    }
+    .comm-input-bar input { flex: 1; }
+
+    @media (max-width: 768px) {
+      .rescue-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ============ LOGIN SCREEN ============ -->
+  <div class="login-container" id="rescue-login-screen">
+    <div class="login-card">
+      <div class="login-card__icon">🌊</div>
+      <div class="login-card__title">Flood Rescue Crew Portal</div>
+      <div class="login-card__desc">Enter your rescue boat access code to view active flood coordinates, stranded citizen reports, and deploy lifeboats.</div>
+      <form id="rescue-login-form">
+        <div class="form-group">
+          <label for="team-code">Boat Unit Access Code</label>
+          <input type="text" id="team-code" class="form-input" placeholder="e.g., ALPHA2026" style="text-align: center; font-size: var(--font-lg); letter-spacing: 0.1em; font-weight: 700;" required />
+        </div>
+        <button type="submit" class="btn btn--primary btn--block" id="btn-team-login">
+          🔓 Access Boat Portal
+        </button>
+        <p style="margin-top: var(--space-lg); font-size: var(--font-xs); color: var(--text-muted);">
+          Authorized units: ALPHA2026 (Swiftwater), BRAVO2026 (NDRF Heavy), CHARLIE2026 (Divers), DELTA2026 (Pumps)
+        </p>
+      </form>
+    </div>
+  </div>
+
+  <!-- ============ RESCUE DASHBOARD ============ -->
+  <div id="rescue-dashboard" style="display: none;">
+
+    <!-- Navigation -->
+    <nav class="navbar">
+      <div class="navbar__logo">
+        <span class="navbar__logo-icon">🌊</span>
+        <span>flood rescue crew</span>
+        <span style="font-size: var(--font-xs); margin-left: var(--space-sm); background: var(--green-glow); color: var(--green); padding: 2px 8px; border-radius: 4px;">BOAT PORTAL</span>
+      </div>
+
+      <div class="navbar__nav">
+        <a href="#" class="navbar__link navbar__link--active">📋 Mission Details</a>
+        <a href="#rescue-map-section" class="navbar__link">🗺️ Flood Map</a>
+        <a href="#comm-section" class="navbar__link">💬 Comms & HQ</a>
+        <a href="#resources-section" class="navbar__link">📦 Boat Gear</a>
+      </div>
+
+      <div class="navbar__right">
+        <div class="navbar__stat" id="rescue-team-status-badge">
+          <span>●</span>
+          <span id="rescue-current-status">Active</span>
+        </div>
+        <button class="btn btn--outline btn--sm" id="btn-update-location">📍 Update Boat GPS</button>
+        <button class="btn btn--danger btn--sm" id="btn-team-logout">Logout</button>
+      </div>
+    </nav>
+
+    <div class="main-layout main-layout--full">
+      <div class="main-content">
+
+        <!-- Team Profile -->
+        <div class="team-profile fade-in delay-1">
+          <div class="team-profile__avatar">🚣</div>
+          <div class="team-profile__info">
+            <div class="team-profile__name" id="rescue-team-name">Alpha Swiftwater Rescue</div>
+            <div class="team-profile__type" id="rescue-team-type">Boat Patrol — Led by <span id="rescue-team-leader">Capt. Arjun Mehta</span></div>
+          </div>
+          <div class="rescue-status-controls" id="status-controls">
+            <button class="status-btn status-btn--enroute" data-status="En Route">🚤 Boat En Route</button>
+            <button class="status-btn status-btn--onscene" data-status="On Scene">🌊 On Scene</button>
+            <button class="status-btn status-btn--resolved" data-status="Resolved">✅ Area Secured</button>
+          </div>
+        </div>
+
+        <!-- Assigned Disaster + Map -->
+        <div class="rescue-grid fade-in delay-2">
+
+          <!-- Disaster Details -->
+          <div class="disaster-detail-card" id="disaster-detail">
+            <div class="disaster-detail-card__title" id="rescue-disaster-title">
+              🌊 Flood — Critical
+            </div>
+            <div class="disaster-detail-card__zone" id="rescue-disaster-zone">
+              Zone A - Chennai Coastal
+            </div>
+            <div class="disaster-detail-grid">
+              <div class="disaster-detail-item">
+                <div class="disaster-detail-item__label">Status</div>
+                <div class="disaster-detail-item__value" id="rescue-disaster-status">Active</div>
+              </div>
+              <div class="disaster-detail-item">
+                <div class="disaster-detail-item__label">Severity</div>
+                <div class="disaster-detail-item__value" id="rescue-disaster-severity">Critical</div>
+              </div>
+              <div class="disaster-detail-item">
+                <div class="disaster-detail-item__label">Affected Population</div>
+                <div class="disaster-detail-item__value" id="rescue-disaster-pop">15,000</div>
+              </div>
+              <div class="disaster-detail-item">
+                <div class="disaster-detail-item__label">Reported At</div>
+                <div class="disaster-detail-item__value" id="rescue-disaster-time">Sep 1, 2026</div>
+              </div>
+            </div>
+            <div class="disaster-detail-desc" id="rescue-disaster-desc">
+              Heavy rainfall causing severe flooding in low-lying coastal areas. Water level rising at 2cm/hour. Multiple residential areas submerged.
+            </div>
+          </div>
+
+          <!-- Mission Map -->
+          <div id="rescue-map-section">
+            <div class="card__title" style="margin-bottom: var(--space-md);">
+              <span class="card__title-icon">🗺️</span>
+              Mission Area Map
+            </div>
+            <div class="rescue-map-container">
+              <div id="rescue-map"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Communication Log + Resources -->
+        <div class="rescue-grid fade-in delay-3">
+
+          <!-- Communication Log -->
+          <div class="card" id="comm-section">
+            <div class="card__header">
+              <div class="card__title">
+                <span class="card__title-icon">💬</span>
+                Communication Log
+              </div>
+            </div>
+            <div class="comm-log" id="comm-log">
+              <div class="comm-log__entry comm-log__entry--system">
+                <div class="comm-log__time">Sep 1, 08:30 AM — SYSTEM</div>
+                <div class="comm-log__text">Disaster alert: Severe flooding reported in Zone A - Chennai Coastal. Immediate deployment required.</div>
+              </div>
+              <div class="comm-log__entry comm-log__entry--system">
+                <div class="comm-log__time">Sep 1, 09:00 AM — HQ</div>
+                <div class="comm-log__text">Team Alpha deployed to Chennai Coastal area. Proceed to Rally Point Alpha at 13.05°N, 80.25°E.</div>
+              </div>
+              <div class="comm-log__entry comm-log__entry--team">
+                <div class="comm-log__time">Sep 1, 09:45 AM — Alpha Team</div>
+                <div class="comm-log__text">Arrived at rally point. Setting up base camp. Water levels at 1.2m in residential areas.</div>
+              </div>
+              <div class="comm-log__entry comm-log__entry--system">
+                <div class="comm-log__time">Sep 1, 11:00 AM — HQ</div>
+                <div class="comm-log__text">Charlie Marine Squad dispatched as backup. ETA 1 hour. Prioritize elderly evacuation.</div>
+              </div>
+              <div class="comm-log__entry comm-log__entry--team">
+                <div class="comm-log__time">Sep 1, 02:00 PM — Alpha Team</div>
+                <div class="comm-log__text">Evacuated 120 residents so far. 3 rescue boats operational. Need additional medical supplies.</div>
+              </div>
+              <div class="comm-log__entry comm-log__entry--system">
+                <div class="comm-log__time">Sep 2, 06:00 AM — HQ</div>
+                <div class="comm-log__text">Medical supply drop confirmed. Helicopter delivery at 08:00. Continue evacuation ops.</div>
+              </div>
+            </div>
+            <div class="comm-input-bar">
+              <input type="text" class="form-input" id="comm-input" placeholder="Type a message to HQ..." />
+              <button class="btn btn--primary btn--sm" id="btn-send-comm">Send</button>
+            </div>
+          </div>
+
+          <!-- Resource Checklist -->
+          <div class="card" id="resources-section">
+            <div class="card__header">
+              <div class="card__title">
+                <span class="card__title-icon">📦</span>
+                Equipment & Resource Checklist
+              </div>
+            </div>
+            <div class="resource-checklist" id="resource-checklist">
+              <!-- Populated by JS -->
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Container -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <script src="js/rescue.js"></script>
+</body>
+</html>
